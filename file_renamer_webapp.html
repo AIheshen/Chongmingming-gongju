@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>File Renamer (HTML)</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#0f1724;--muted:#94a3b8;--accent:#7c3aed}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{background:var(--bg);color:#e6eef8;display:flex;align-items:flex-start;justify-content:center;padding:28px}
+    .container{width:920px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+    h1{margin:0 0 12px;font-size:20px}
+    .drop{border:2px dashed rgba(255,255,255,0.04);padding:28px;border-radius:8px;text-align:center;color:var(--muted);cursor:pointer}
+    .controls{display:flex;gap:8px;margin:12px 0}
+    input[type=text]{background:var(--panel);border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:6px;color:inherit}
+    button{background:var(--accent);border:none;padding:8px 10px;border-radius:6px;color:white;cursor:pointer}
+    .list{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+    .item{display:flex;gap:10px;align-items:center;padding:10px;background:rgba(255,255,255,0.02);border-radius:8px}
+    .seq{width:44px;text-align:center;background:transparent;border-radius:6px;padding:6px;border:1px solid rgba(255,255,255,0.03)}
+    .name{flex:1;min-width:200px}
+    .prefix{width:160px}
+    .actions{display:flex;gap:6px}
+    .muted{color:var(--muted);font-size:13px}
+    .renamed{color:#86efac;font-size:13px}
+    small{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>File Renamer — HTML (dot separator)</h1>
+
+      <div id="drop" class="drop">Drag &amp; drop files here, or click to choose</div>
+
+      <div class="controls">
+        <input id="globalPrefix" type="text" placeholder="Global prefix for newly added files (applies to subsequent files)" />
+        <button id="applyAll">Apply to all</button>
+        <button id="downloadAll">Download all</button>
+      </div>
+
+      <div id="list" class="list">
+        <div id="empty" class="muted">No files yet.</div>
+      </div>
+
+      <div style="margin-top:10px" class="muted">Rename pattern: <code>prefix.seq.ext</code> if prefix present, otherwise <code>seq.ext</code>. Separator is a dot ("."). Sequence numbers are read-only and auto-updated when items are reordered or deleted.</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const drop = document.getElementById('drop');
+  const listEl = document.getElementById('list');
+  const empty = document.getElementById('empty');
+  const globalPrefixInput = document.getElementById('globalPrefix');
+  const applyAllBtn = document.getElementById('applyAll');
+  const downloadAllBtn = document.getElementById('downloadAll');
+
+  let items = []; // {id,file,originalName,prefix,seq}
+  let globalPrefix = '';
+
+  function uid(){return 'id-' + Math.random().toString(36).slice(2,9)}
+
+  function render(){
+    listEl.innerHTML = '';
+    if(items.length===0){ listEl.appendChild(empty); return }
+    items.forEach((it, idx) => {
+      const row = document.createElement('div'); row.className='item';
+      const seq = document.createElement('input'); seq.className='seq'; seq.type='text'; seq.readOnly=true; seq.value = idx+1;
+      const name = document.createElement('div'); name.className='name'; name.textContent = it.originalName;
+
+      const prefixInput = document.createElement('input'); prefixInput.className='prefix'; prefixInput.type='text'; prefixInput.value = it.prefix || '';
+      prefixInput.addEventListener('input', (e)=>{
+        it.prefix = e.target.value;
+        // editing any file's prefix sets the global prefix used for future drops
+        globalPrefix = e.target.value;
+        globalPrefixInput.value = globalPrefix;
+        updateRenamedLabel(row, it, idx);
+      });
+
+      const seqBox = document.createElement('input'); seqBox.type='text'; seqBox.readOnly=true; seqBox.value = idx+1; seqBox.className='seq';
+
+      const actions = document.createElement('div'); actions.className='actions';
+      const upBtn = document.createElement('button'); upBtn.textContent='↑'; upBtn.title='Move up'; upBtn.addEventListener('click', ()=> moveItem(idx, -1));
+      const downBtn = document.createElement('button'); downBtn.textContent='↓'; downBtn.title='Move down'; downBtn.addEventListener('click', ()=> moveItem(idx, 1));
+      const delBtn = document.createElement('button'); delBtn.textContent='删除'; delBtn.style.background='#ef4444'; delBtn.addEventListener('click', ()=> removeItem(idx));
+      const dlBtn = document.createElement('button'); dlBtn.textContent='下载'; dlBtn.style.background='#2563eb'; dlBtn.addEventListener('click', ()=> downloadItem(it, idx));
+
+      actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn); actions.appendChild(dlBtn);
+
+      const right = document.createElement('div'); right.style.display='flex'; right.style.flexDirection='column'; right.style.alignItems='flex-end';
+      const renamedLbl = document.createElement('div'); renamedLbl.className='renamed'; renamedLbl.textContent = getRenamed(it, idx+1);
+      const small = document.createElement('small'); small.className='muted'; small.textContent = 'Renamed';
+      right.appendChild(small); right.appendChild(renamedLbl);
+
+      row.appendChild(seqBox);
+      row.appendChild(name);
+      row.appendChild(prefixInput);
+      row.appendChild(actions);
+      row.appendChild(right);
+
+      listEl.appendChild(row);
+    });
+  }
+
+  function updateRenamedLabel(row, it, seq){
+    const lbl = row.querySelector('.renamed');
+    lbl.textContent = getRenamed(it, seq);
+  }
+
+  function getRenamed(it, seq){
+    const name = it.originalName;
+    const lastDot = name.lastIndexOf('.');
+    const ext = lastDot === -1 ? '' : name.slice(lastDot);
+    const cleanPrefix = (it.prefix || '').toString().trim();
+    if(cleanPrefix.length>0){
+      return `${cleanPrefix}.${seq}${ext}`;
+    }else{
+      return `${seq}${ext}`;
+    }
+  }
+
+  function addFiles(fileList){
+    const files = Array.from(fileList);
+    files.forEach((f)=>{
+      const it = {id: uid(), file: f, originalName: f.name, prefix: globalPrefix, seq: items.length+1};
+      items.push(it);
+    });
+    render();
+  }
+
+  function removeItem(idx){
+    items.splice(idx,1);
+    render();
+  }
+
+  function moveItem(idx, dir){
+    const newIdx = idx + dir;
+    if(newIdx<0 || newIdx>=items.length) return;
+    const [it] = items.splice(idx,1);
+    items.splice(newIdx,0,it);
+    render();
+  }
+
+  function downloadItem(it, idx){
+    const seq = idx+1;
+    const renamed = getRenamed(it, seq);
+    const url = URL.createObjectURL(it.file);
+    const a = document.createElement('a'); a.href = url; a.download = renamed; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }
+
+  async function downloadAll(){
+    for(let i=0;i<items.length;i++){
+      downloadItem(items[i], i);
+      // small pause so browser doesn't block
+      await new Promise(r=>setTimeout(r,200));
+    }
+  }
+
+  // drag/drop handlers
+  drop.addEventListener('click', ()=>{
+    const inp = document.createElement('input'); inp.type='file'; inp.multiple=true; inp.onchange = (e)=> addFiles(e.target.files); inp.click();
+  });
+  drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.borderColor = 'rgba(124,58,237,0.9)'; });
+  drop.addEventListener('dragleave', ()=>{ drop.style.borderColor='rgba(255,255,255,0.04)'});
+  drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.style.borderColor='rgba(255,255,255,0.04)'; addFiles(e.dataTransfer.files); });
+
+  globalPrefixInput.addEventListener('input', (e)=>{ globalPrefix = e.target.value; });
+  applyAllBtn.addEventListener('click', ()=>{ items = items.map(it=> ({...it, prefix: globalPrefix})); render(); });
+  downloadAllBtn.addEventListener('click', ()=> downloadAll());
+
+  // initial render
+  render();
+})();
+</script>
+</body>
+</html>
